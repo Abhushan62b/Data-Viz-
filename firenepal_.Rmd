@@ -1,0 +1,218 @@
+---
+title: "Forestfires"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+date: "2024-04-28"
+---
+
+Install packages
+
+```{r}
+install.packages("readxl")
+library(readxl)
+library(dplyr)
+library(ggplot2)
+```
+
+Install BBC packages
+
+```{r}
+if(!require(pacman))install.packages("pacman")
+
+pacman::p_load('dplyr', 'tidyr', 'gapminder',
+               'ggplot2',  'ggalt',
+               'forcats', 'R.utils', 'png', 
+               'grid', 'ggpubr', 'scales',
+               'bbplot')
+```
+
+```{r}
+install.packages('rsconnect')
+```
+
+```{r}
+devtools::install_github('bbc/bbplot')
+```
+
+Read the Excel files of forestfires from Jan 1, 2020 to April 28, 2024
+
+```{r}
+
+
+data_2020 <- read_excel("ForestFire_Nepal_aJan_April_20.xls")
+data_2020_21 <- read_excel("ForestFire_Nepal_April_20_21.xls")
+data_2021_22 <- read_excel("ForestFire_Nepal_April_21_22.xls")
+data_2022_23 <- read_excel("ForestFire_Nepal_April_22_23.xls")
+data_2023_24 <- read_excel("ForestFire_Nepal_April_23_24.xls")
+```
+
+Merge multiple data frames
+
+```{r}
+data_2020_24 <- rbind(data_2020, data_2020_21, data_2021_22, data_2022_23, data_2023_24)
+```
+
+Filter data with confidence \>70 only (f0)
+
+```{r}
+data_2020_24_f0 <- subset(data_2020_24, Confidence > 70)
+```
+
+Clean data by removing similar rows (f1)
+
+```{r}
+data_2020_24_f1 <- distinct(data_2020_24_f0)
+```
+
+Clean data by removing columns with missing values 'protected areas' (f2)
+
+```{r}
+data_2020_24_f2 <- data_2020_24_f1 %>% select(which(colSums(is.na(data_2020_24_f1)) == 0))
+```
+
+Extract the 'Year' and 'Month' from the "Date" column
+
+```{r}
+data_2020_24_f2$Date <- as.Date(data_2020_24_f2$Date)
+data_2020_24_f2$Year <- format(as.Date(data_2020_24_f2$Date), "%Y")
+data_2020_24_f2$Month <- format(as.Date(data_2020_24_f2$Date), "%m")
+
+```
+
+Calculate the count of fire incidents for each year
+
+```{r}
+yearly_fire_counts <- table(data_2020_24_f2$Year)
+```
+
+Convert the counts to a data frame
+
+```{r}
+fire_counts_df <- as.data.frame(yearly_fire_counts)
+names(fire_counts_df) <- c("Year", "Fire_Count")
+```
+
+Plot the bar graph
+
+```{r}
+plot_bar <- ggplot(fire_counts_df, aes(x = Year, y = Fire_Count)) +
+  geom_bar(stat = "identity", fill = "#F46203", width = 0.5) +
+  
+  #adding in-bar labels
+  geom_label(aes(x = Year, y = Fire_Count, label = round(Fire_Count, 0)),
+             hjust = 0.5, 
+             vjust = 1, 
+             colour = "white", 
+             fill = NA, 
+             label.size = NA, 
+             family="Helvetica", 
+             size = 4) +
+
+   geom_hline(yintercept = 0, size = 1, colour="#333333") +
+   bbc_style() +
+  labs(title = "Forest Fires in Nepal on the rise again", subtitle = "Forest fire incidents surged by over 100 % per year since the 2021 record", x=NULL, y=NULL)+
+  theme(
+    plot.title = element_text(size = 20),  
+    plot.subtitle = element_text(size = 14, margin=margin(b=50))
+  )
+
+
+#Finalize the plot
+
+finalise_plot(plot_name = plot_bar,
+              source = "Source: MoFE, Nepal. 2024 figures are until April 28.",
+              save_filepath = "ff0.png",
+              width_pixels = 640,
+              height_pixels = 450,
+              )
+
+
+```
+
+#Group data by year and month, calculate sum of fire counts
+
+```{r}
+monthly_fire_count <- data_2020_24_f2 %>%
+  group_by(Year, Month, .groups = "drop") %>%
+  summarise(Fire_Count = n())
+
+# Create a data frame with complete sequences of years and months
+complete_dates <- expand.grid(
+  Year = unique(monthly_fire_count$Year),
+  Month = sprintf("%02d", 1:12)  # Format month with leading zero
+)
+
+# Convert Year and Month to character type
+complete_dates$Year <- as.character(complete_dates$Year)
+complete_dates$Month <- as.character(complete_dates$Month)
+
+# Perform left join to merge with existing data frame
+complete_df <- left_join(complete_dates, monthly_fire_count, by = c("Year", "Month"))
+
+# Replace missing Fire_Count values with 0
+complete_df$Fire_Count[is.na(complete_df$Fire_Count)] <- 0
+
+# Convert Fire_Count to integer
+complete_df$Fire_Count <- as.integer(complete_df$Fire_Count)
+
+# Change the month format to abbreviated month names
+complete_df$Month <- month.abb[as.integer(complete_df$Month)]
+
+# Convert the "Month" column to a factor with ordered levels from Jan to Dec
+complete_df$Month <- factor(complete_df$Month, levels = month.abb, ordered = TRUE)
+
+
+# Now complete_df contains all months for each year with Fire_Count values filled in,
+# including missing months with Fire_Count as 0
+
+```
+
+#Plot the multiple line chart
+
+```{r}
+
+  
+#Plot the graph
+plot_line <- ggplot(complete_df, aes(x = Month, y = Fire_Count, group = Year, colour = as.factor(Year))) +
+  geom_line(size = 1) +
+  ylim(c(0,1400)) +
+  geom_point(size = 1, shape = 5, fill = "white") +
+  geom_hline(yintercept = 0, size = 1, colour="#333333") +
+  scale_colour_manual(values = c("#0078FF", "#1380A1", "#C76ADA", "#E4134F", "#F46203")) + 
+  bbc_style() +
+  theme(legend.position = "bottom") +
+  labs(title="Forest Fires in Nepal on the rise again",
+       subtitle = "'Dry and Windy' April month accounts for the most forest fires in the last five years") +
+theme(
+    plot.title = element_text(size = 22),  
+    plot.subtitle = element_text(size = 14)  
+  )
+
+#Finalize the plot
+
+finalise_plot(plot_name = plot_line,
+              source = "Source: MoFE, Nepal. 2024 figures are until April 28.",
+              save_filepath = "ff1.png",
+              width_pixels = 640,
+              height_pixels = 450,
+              )
+
+  
+```
+
+Line Chart:
+
+```{r}
+ggplot(fire_counts_df, aes(x = Year, y = Fire_Count,  group = 1)) +
+    geom_line(colour = "#F46203", size = 1) +
+  ylim(c(0,2000)) +
+    geom_hline(yintercept = 0, size = 1, colour="#333333") +
+    bbc_style() +
+  labs(title="Forest Fires in Nepal",
+       subtitle = "Number of forest fires reported in last five years") + 
+   theme(
+  axis.ticks.x = element_line(colour = "#333333"), 
+  axis.ticks.length =  unit(0.26, "cm"))
+```
